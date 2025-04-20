@@ -7,6 +7,9 @@ import torch.nn.functional as F
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
 from transformers import CLIPImageProcessor
+from typing import Literal, Tuple,List
+import json
+
 
 import random
 import os.path as osp
@@ -17,14 +20,21 @@ class VTHDDataset(data.Dataset):
         Dataset for VTON HD
     """
     
-    def __init__(self, dataroot, image_size=512, max_person=5, mode='train'):
+    def __init__(self, 
+                 dataroot:str, 
+                 image_size:Tuple[int, int] = (512, 384), 
+                 max_person:int = 5, 
+                 mode:Literal["train", "test"] = "train", 
+                 order:Literal["paired", "unpaired"] = "paired"):
         self.root = dataroot
         self.mode = mode
         self.datalist = mode + '_pairs.txt'
-        self.fine_height = image_size
-        self.fine_width = int(image_size / 256 * 256)
+        self.fine_height = image_size[0]
+        self.fine_width = image_size[1]
         self.max_person = max_person
         self.data_path = osp.join(dataroot, mode)
+        self.order = order
+        
         # transforms
         self.crop_size = (self.fine_height, self.fine_width)
         self.toTensor = transforms.ToTensor()
@@ -38,12 +48,73 @@ class VTHDDataset(data.Dataset):
         ])
         self.flip_transform = transforms.RandomHorizontalFlip(p=1)
         
+        # annotation
+        with open(
+            os.path.join(dataroot, mode, "vitonhd_" + mode + "_tagged.json"), "r"
+        ) as file1:
+            data = json.load(file1)
+        
+        annotation_list = [
+            "sleeveLength",
+            "neckLine",
+            "details",
+            "item",
+        ]
+        
+        self.annotation_pair = {}
+        self.nums_annotation = {}
+        for k, v in data.items():
+            for elem in v:
+                annotation_str = ""
+                for template in annotation_list:
+                    for tag in elem["tag_info"]:
+                        if (
+                            tag["tag_name"] == template
+                            and tag["tag_category"] is not None
+                        ):
+                            annotation_str += tag["tag_category"]
+                            annotation_str += " "
+                self.annotation_pair[elem["file_name"]] = annotation_str
+                self.nums_annotation[elem["file_name"]] = elem['per_info']['nums']
+        # get list of filename
+        im_names = []
+        c_names = []
+        
+        with open(self.datalist, "r") as f:
+            for line in f.readlines():
+                if mode == 'train':
+                    im_name, _ = line.strip().split()
+                    c_name = im_name
+                else:
+                    if order == 'paired':
+                        im_name, _ = line.strip().split()
+                        c_name = im_name
+                    else:
+                        im_name, c_name = line.strip().split()
+                
+                im_names.append(im_name)
+                c_names.append(c_name)
+        
+        self.im_names = im_names
+        self.c_names = c_names
+        
+        
     
     def __len__(self):
         len(os.listdir(osp(self.data_path, 'image')))
     
     def __getitem__(self, index):
-        filename = f'{index:05d}_00.jpg'
+        filename = self.im_names[index]
+        filename_cloth = self.c_names[index]
+        
+        # annotation
+        if filename_cloth in self.annotation_pair:
+            cloth_annotation = self.annotation_pair[filename_cloth]
+        else:
+            cloth_annotation = "shirts"
+            
+        nums_person = self.nums_annotation[filename]
+        
         # person image
         person = Image.open(osp(self.data_path, 'image', filename))
         person = transforms.Resize(self.crop_size, interpolation=2)(person)
@@ -55,11 +126,12 @@ class VTHDDataset(data.Dataset):
         inpaint = self.transform(inpaint)
         
         # mask inpainting
-        mask = (person - inpaint)[:1]
+        mask = (person - inpaint)
         mask[mask != 0] = 1 
+        mask = torch.max(mask, dim=-1)
         
         # cloth image
-        cloth = Image.open(osp(self.data_path, 'cloth', filename))
+        cloth = Image.open(osp(self.data_path, 'cloth', filename_cloth))
         
         
         # dense pose image (NEED MODIFINE)
@@ -162,5 +234,8 @@ class VTHDDataset(data.Dataset):
         result['segment'] = segment
         result['inpaint'] = inpaint
         result['mask'] = mask
+        result["caption"] = f"{nums_person} people are wearing " + cloth_annotation
+        result["caption_cloth"] = "a photo of " + cloth_annotation
+        result["annotation"] = cloth_annotation
         
         return result
