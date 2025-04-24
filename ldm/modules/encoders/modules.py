@@ -3,10 +3,11 @@ import torch.nn as nn
 import kornia
 from torch.utils.checkpoint import checkpoint
 
-from transformers import T5Tokenizer, T5EncoderModel, CLIPTokenizer, CLIPTextModel
+from transformers import T5Tokenizer, T5EncoderModel, CLIPTokenizer, CLIPTextModel, CLIPVisionModelWithProjection
 
 import open_clip
 from ldm.util import default, count_params, autocast
+from ldm.modules.ip_adapter.resampler import CustomResampler
 
 
 class AbstractEncoder(nn.Module):
@@ -133,6 +134,49 @@ class FrozenCLIPEmbedder(AbstractEncoder):
 
     def encode(self, text):
         return self(text)
+
+class FrozenCLIPImageEmbedder(AbstractEncoder):
+    """Uses the CLIP transformer encoder for image (from huggingface)"""
+
+    def __init__(self, num_tokens, out_dims, version="laion/CLIP-ViT-H-14-laion2B-s32B-b79K", device="cuda", freeze=True):  
+        super().__init__()
+        self.num_tokens = num_tokens
+        self.out_dims = out_dims
+        self.encoder = CLIPVisionModelWithProjection.from_pretrained(version).to(
+            device, dtype=torch.float16
+        )
+        self.image_proj_model = self.init_proj()
+        if freeze:
+            self.freeze()
+
+    def freeze(self):
+        self.encoder = self.encoder.eval()
+        # self.train = disabled_train
+        for param in self.parameters():
+            param.requires_grad = False
+
+    def init_proj(self):
+        image_proj_model = CustomResampler(
+            dim=self.encoder.config.hidden_size,
+            depth=4,
+            dim_head=64,
+            heads=12,
+            num_queries=self.num_tokens,
+            embedding_dim=self.encoder.config.hidden_size,
+            output_dim=self.out_dims,
+            ff_mult=4,
+        ).to(self.device, dtype=torch.float16)
+        return image_proj_model
+
+    def forward(self, clip_image):
+        clip_image = clip_image.to(self.device, dtype=torch.float16)
+        clip_image_embeds = self.encoder(clip_image, output_hidden_states=True).hidden_states[-2]
+        z = self.image_proj_model(clip_image_embeds)
+        return z
+
+    def encode(self, clip_image):
+        return self(clip_image)
+
 
 
 class ClipImageEmbedder(nn.Module):

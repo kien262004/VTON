@@ -6,7 +6,7 @@ import torch.utils.data as data
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
-from transformers import CLIPImageProcessor
+from transformers import CLIPProcessor
 from typing import Literal, Tuple,List
 import json
 
@@ -42,7 +42,7 @@ class VTHDDataset(data.Dataset):
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
-        self.clip_transform = CLIPImageProcessor()
+        self.clip_transform = CLIPProcessor.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
         self.transform_mask = transforms.Compose([
             transforms.ToTensor()
         ])
@@ -225,7 +225,8 @@ class VTHDDataset(data.Dataset):
                     shear=0,
                 )
         
-        cloth_trim =  self.clip_transform(images=cloth, return_tensors="pt").pixel_values
+        cloth_trim = self.clip_transform(images=cloth, return_tensors="pt").pixel_values
+        input 
         
         result = {}
         result['person'] = person

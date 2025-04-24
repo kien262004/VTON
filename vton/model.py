@@ -1,9 +1,12 @@
 import torch
 import random
 from torchvision.transforms import Resize
+from diffusers import UNet2DConditionModel
 from ldm.models.diffusion.ddpm import LatentDiffusion, DDPM
 from ldm.modules.distributions.distributions import normal_kl, DiagonalGaussianDistribution
+from vton.feature_net import ControlNetModel
 from ldm.util import default
+
 
 __conditioning_keys__ = {'concat': 'c_concat',
                          'crossattn': 'c_crossattn',
@@ -13,7 +16,8 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
     def __init__(self, first_stage_config, cond_stage_config, *args, **kwargs):
         super().__init__(first_stage_config, cond_stage_config, *args, **kwargs)
         # TODO: Need implement feature_net
-        self.feature_net = None
+        unet = UNet2DConditionModel.from_pretrained('stabilityai/stable-diffusion-2-1')
+        self.feature_net = ControlNetModel.from_unet(unet=unet)
         
     @torch.no_grad()
     def encode_first_stage(self, x):
@@ -64,6 +68,7 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         segment = DDPM.get_input(self, batch, 'segment')
         inpaint = DDPM.get_input(self, batch, 'inpaint')
         mask = DDPM.get_input(self, batch, 'mask')
+        
         
         if bs is not None:
             x = x[:bs]
@@ -164,17 +169,21 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
 
         else:
             loss, loss_dict = self.p_losses(x, c, t, x_add, cloth)
+        
+        return loss, loss_dict
             
-    def p_losses(self, x_start, cond, t, x_add, cloth, noise=None):
+    def p_losses(self, x_start, cond, t, x_add, cloth, annotations, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         if self.first_stage_key == 'inpaint':
             x_noisy = torch.concat((x_noisy, x_add), dim=1)
-
+        
+        cloth_annotations = annotations['cloth']
+        
         # Get condition embedding
+        feature_samples = self.feature_net(cloth, encoder_hidden_states=cloth_annotations, timestep=t)
         
-        
-        model_output = self.apply_model(x_noisy, t, cond)
+        model_output = self.apply_model(x_noisy, t, cond, feature_samples)
         loss_dict = {}
         prefix = 'train' if self.training else 'val'
 
@@ -206,6 +215,23 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         loss_dict.update({f'{prefix}/loss': loss})
 
         return loss, loss_dict
+
+    def apply_model(self, x_noisy, t, cond, feature_sample, return_ids=False):
+        if isinstance(cond, dict):
+            # hybrid case, cond is expected to be a dict
+            pass
+        else:
+            if not isinstance(cond, list):
+                cond = [cond]
+            key = 'c_concat' if self.model.conditioning_key == 'concat' else 'c_crossattn'
+            cond = {key: cond}
+
+        x_recon = self.model(x_noisy, t, cond, feature_sample)
+
+        if isinstance(x_recon, tuple) and not return_ids:
+            return x_recon[0]
+        else:
+            return x_recon
         
 
     def sample_hijack(self, x_start, cond, t, controlnet_cond_f=None, controlnet_cond_b=None, skeleton_cf=None,
