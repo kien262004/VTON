@@ -225,8 +225,7 @@ class VTHDDataset(data.Dataset):
                     shear=0,
                 )
         
-        cloth_trim = self.clip_transform(images=cloth, return_tensors="pt").pixel_values
-        input 
+        cloth_trim = self.clip_transform(images=cloth, return_tensors="pt").pixel_values 
         
         result = {}
         result['person'] = person

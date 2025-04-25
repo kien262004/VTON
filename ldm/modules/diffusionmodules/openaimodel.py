@@ -1175,7 +1175,8 @@ class ConfigUNetModel(nn.Module):
         hs = []
         t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
         emb = self.time_embed(t_emb)
-
+        for layer in features:
+            print(f'feature_layers: {layer.shape}')
         if self.num_classes is not None:
             assert y.shape[0] == x.shape[0]
             emb = emb + self.label_emb(y)
@@ -1183,6 +1184,7 @@ class ConfigUNetModel(nn.Module):
         h = x.type(self.dtype)
         for module in self.input_blocks:
             h = module(h, emb, context)
+            print(f'Main Unet: {h.shape}')
             hs.append(h)
         
         h = self.middle_block(h, emb, context)

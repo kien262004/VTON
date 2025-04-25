@@ -17,7 +17,7 @@ from functools import partial
 import itertools
 from tqdm import tqdm
 from torchvision.utils import make_grid
-from pytorch_lightning.utilities.distributed import rank_zero_only
+from lightning_fabric.utilities.rank_zero import rank_zero_only
 from omegaconf import ListConfig
 
 from ldm.util import log_txt_as_img, exists, default, ismap, isimage, mean_flat, count_params, instantiate_from_config
@@ -980,7 +980,7 @@ class LatentDiffusion(DDPM):
                                        return_x0=return_x0,
                                        score_corrector=score_corrector, corrector_kwargs=corrector_kwargs)
         if return_codebook_ids:
-            raise DeprecationWarning("Support dropped.")
+            # raise DeprecationWarning("Support dropped.")
             model_mean, _, model_log_variance, logits = outputs
         elif return_x0:
             model_mean, _, model_log_variance, x0 = outputs

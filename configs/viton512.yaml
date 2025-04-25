@@ -72,8 +72,15 @@ model:
       target: ldm.modules.encoders.modules.FrozenCLIPImageEmbedder
       params: 
           num_tokens: 16
-          out_dims: 768
-          version: "openai/clip-vit-large-patch14"
+          out_dims: 1024
+          version: "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
+    
+    cond_text_stage_config:
+      target: ldm.modules.encoders.modules.FrozenCLIPEmbedder
+      params:
+          version: "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
+          layer: "last"
+
     
 
 data:
@@ -82,7 +89,7 @@ data:
       batch_size: 2
       wrap: False
       train:
-          target: ldm.data.cp_dataset.CPDataset
+          target: ldm.data.vtonhdataset.VTHDDataset
           params:
               mode: train
               dataroot: /mnt/pfs-mc0p4k/cvg/team/didonglin/why/datasets/mv_1000_split

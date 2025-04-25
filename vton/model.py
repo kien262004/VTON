@@ -13,9 +13,12 @@ __conditioning_keys__ = {'concat': 'c_concat',
                          'adm': 'y'}
 
 class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
-    def __init__(self, first_stage_config, cond_stage_config, *args, **kwargs):
+    def __init__(self, first_stage_config, cond_stage_config, cond_text_stage_config, *args, **kwargs):
         super().__init__(first_stage_config, cond_stage_config, *args, **kwargs)
         # TODO: Need implement feature_net
+        
+        self.cond_text_stage_model = self.instantiate_cond_stage(cond_text_stage_config)
+        
         unet = UNet2DConditionModel.from_pretrained('stabilityai/stable-diffusion-2-1')
         self.feature_net = ControlNetModel.from_unet(unet=unet)
         
@@ -58,9 +61,37 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
                 return self.first_stage_model.encode(x)
         else:
             return self.first_stage_model.encode(x)
+    
+    def get_learned_conditioning(self, c, cond_type='image'):
+        if cond_type == 'image':
+            if self.cond_stage_forward is None:
+                if hasattr(self.cond_stage_model, 'encode') and callable(self.cond_stage_model.encode):
+                    c = self.cond_stage_model.encode(c)
+                    if isinstance(c, DiagonalGaussianDistribution):
+                        c = c.mode()
+                else:
+                    c = self.cond_stage_model(c)
+            else:
+                assert hasattr(self.cond_stage_model, self.cond_stage_forward)
+                c = getattr(self.cond_stage_model, self.cond_stage_forward)(c)
+            return c
+
+        elif cond_type == 'text':
+            if self.cond_stage_forward is None:
+                if hasattr(self.cond_text_stage_model, 'encode') and callable(self.cond_text_stage_model.encode):
+                    c = self.cond_text_stage_model.encode(c)
+                    if isinstance(c, DiagonalGaussianDistribution):
+                        c = c.mode()
+                else:
+                    c = self.cond_text_stage_model(c)
+            else:
+                assert hasattr(self.cond_text_stage_model, self.cond_stage_forward)
+                c = getattr(self.cond_text_stage_model, self.cond_stage_forward)(c)
+            return c
+
         
     def get_input(self, batch, return_first_stage_outputs=False, force_c_encode=False, cond_key=None,
-                  return_original_cond=False, bs=None, get_mask=False, get_reference=False, get_inpaint=False, get_segment=False):
+                  return_original_cond=False, bs=None, get_mask=False, get_reference=False, get_inpaint=False, get_segment=False, get_annotations=False):
 
         x = DDPM.get_input(self, batch, 'person')
         cloth_clip = DDPM.get_input(self, batch, 'cloth_clip')
@@ -69,6 +100,9 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         inpaint = DDPM.get_input(self, batch, 'inpaint')
         mask = DDPM.get_input(self, batch, 'mask')
         
+        caption = batch['caption']
+        cloth_caption = batch['cloth_caption']
+        annotations = {'caption':caption, 'cloth_caption':cloth_caption}
         
         if bs is not None:
             x = x[:bs]
@@ -136,6 +170,8 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
             out.append(cloth)
         if get_segment:
             out.append(segment)
+        if get_annotations:
+            out.append(annotations)
         
         return out
         
@@ -144,44 +180,50 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         # Set segment in z_add (concat with main input set for test)
         # Have to repair code in get_input if want to fusion segment with cloth branch
         
-        z_tgt, z_src, z_add, cond, x_tgt, cloth = self.get_input(batch, get_reference=True)
-        loss, loss_dict = self(z_tgt, z_src, z_add, cond, x_tgt, cloth, **kwargs)
+        z_tgt, z_src, z_add, cond, x_tgt, cloth, annotations = self.get_input(batch, get_reference=True, get_annotations=True)
+        loss, loss_dict = self(z_tgt, z_src, z_add, cond, x_tgt,  cloth, annotations, **kwargs)
         return loss, loss_dict
         
 
-    def forward(self, x, x_src, x_add, c, gt, cloth, *args, **kwargs):
+    def forward(self, x, x_src, x_add, c, gt, cloth, annotations, *args, **kwargs):
         self.opt.params = self.params
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
+        
+        caption = annotations['caption']
+        cloth_caption = annotations['cloth_caption']
         
         if self.model.conditioning_key is not None:
             assert c is not None
             
             if self.cond_stage_trainable:
                 c = self.get_learned_conditioning(c)
+                caption = self.get_learned_conditioning(caption, 'text')
+                cloth_caption = self.get_learned_conditioning(cloth_caption, 'text')
             
             if self.shorten_cond_schedule:
                 tc = self.cond_ids[t].to(self.device)
                 c = self.q_sample(x_start=c, t=tc, noise=torch.randn_like(c.float()))
+                caption = self.q_sample(x_start=caption, t=tc, noise=torch.randn_like(c.float()))
+                cloth_caption = self.q_sample(x_start=cloth_caption, t=tc, noise=torch.randn_like(c.float()))
+
 
         if self.u_cond_prop < self.u_cond_percent:
             self.opt.params = self.params_with_white
-            loss, loss_dict = self.p_losses(x, c, t, x_add, cloth)
+            loss, loss_dict = self.p_losses(x, c, t, x_add, cloth, caption, cloth_caption)
 
         else:
-            loss, loss_dict = self.p_losses(x, c, t, x_add, cloth)
+            loss, loss_dict = self.p_losses(x, c, t, x_add, cloth, caption, cloth_caption)
         
         return loss, loss_dict
             
-    def p_losses(self, x_start, cond, t, x_add, cloth, annotations, noise=None):
+    def p_losses(self, x_start, cond, t, x_add, cloth, caption, cloth_caption, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         if self.first_stage_key == 'inpaint':
             x_noisy = torch.concat((x_noisy, x_add), dim=1)
         
-        cloth_annotations = annotations['cloth']
-        
         # Get condition embedding
-        feature_samples = self.feature_net(cloth, encoder_hidden_states=cloth_annotations, timestep=t)
+        feature_samples = self.feature_net(cloth, encoder_hidden_states=cloth_caption, timestep=t)
         
         model_output = self.apply_model(x_noisy, t, cond, feature_samples)
         loss_dict = {}
