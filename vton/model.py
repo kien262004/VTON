@@ -32,7 +32,6 @@ __conditioning_keys__ = {'concat': 'c_concat',
 class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
     def __init__(self, first_stage_config, cond_stage_config, cond_text_stage_config, *args, **kwargs):
         super().__init__(first_stage_config, cond_stage_config, *args, **kwargs)
-        # TODO: Need implement feature_net
         
         self.cond_text_stage_model = self.instantiate_cond_stage(cond_text_stage_config)
         

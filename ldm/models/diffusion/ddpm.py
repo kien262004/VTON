@@ -17,7 +17,7 @@ from functools import partial
 import itertools
 from tqdm import tqdm
 from torchvision.utils import make_grid
-from lightning_fabric.utilities.rank_zero import rank_zero_only
+from pytorch_lightning.utilities.distributed import rank_zero_only
 from omegaconf import ListConfig
 
 from ldm.util import log_txt_as_img, exists, default, ismap, isimage, mean_flat, count_params, instantiate_from_config
@@ -581,7 +581,7 @@ class LatentDiffusion(DDPM):
         else:
             self.register_buffer('scale_factor', torch.tensor(scale_factor))
         self.instantiate_first_stage(first_stage_config)
-        self.instantiate_cond_stage(cond_stage_config)
+        self.cond_stage_model = self.instantiate_cond_stage(cond_stage_config)
         self.cond_stage_forward = cond_stage_forward
         self.clip_denoised = False
         self.bbox_tokenizer = None
@@ -642,22 +642,25 @@ class LatentDiffusion(DDPM):
         if not self.cond_stage_trainable:
             if config == "__is_first_stage__":
                 print("Using first stage also as cond stage.")
-                self.cond_stage_model = self.first_stage_model
+                cond_stage_model = self.first_stage_model
             elif config == "__is_unconditional__":
                 print(f"Training {self.__class__.__name__} as an unconditional model.")
-                self.cond_stage_model = None
+                cond_stage_model = None
                 # self.be_unconditional = True
             else:
                 model = instantiate_from_config(config)
-                self.cond_stage_model = model.eval()
-                self.cond_stage_model.train = disabled_train
-                for param in self.cond_stage_model.parameters():
+                cond_stage_model = model.eval()
+                cond_stage_model.train = disabled_train
+                for param in cond_stage_model.parameters():
                     param.requires_grad = False
+                
         else:
             assert config != '__is_first_stage__'
             assert config != '__is_unconditional__'
             model = instantiate_from_config(config)
-            self.cond_stage_model = model
+            cond_stage_model = model
+        return cond_stage_model
+            
 
     def _get_denoise_row_from_list(self, samples, desc='', force_no_decoder_quantization=False):
         denoise_row = []
