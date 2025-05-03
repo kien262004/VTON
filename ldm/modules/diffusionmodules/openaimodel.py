@@ -1187,7 +1187,7 @@ class ConfigUNetModel(nn.Module):
         h = x.type(self.dtype)
         for idx, module in enumerate(self.input_blocks):
             c = th.cat([context, down_cond_samples[idx]], dim=1)
-            h = module(h, emb, context)
+            h = module(h, emb, c)
             hs.append(h)
         
         c = th.cat([context, mid_cond_sample], dim=1)
@@ -1197,7 +1197,7 @@ class ConfigUNetModel(nn.Module):
         for idx, module in enumerate(self.output_blocks):
             h = th.cat([h, hs.pop()], dim=1)
             c = th.cat([context, down_cond_samples[idx]], dim=1)
-            h = module(h, emb, context)
+            h = module(h, emb, c)
         h = h.type(x.dtype)
         if self.predict_codebook_ids:
             return self.id_predictor(h)

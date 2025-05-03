@@ -38,48 +38,11 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         self.text_img_embed = TextImageEmbedding(self.cond_text_stage_model.transformer.config.hidden_size,
                                                  self.cond_stage_model.out_dim,
                                                  self.cond_stage_model.out_dim)
-        unet = UNet2DConditionModel.from_pretrained('stabilityai/stable-diffusion-2-1')
+        unet = UNet2DConditionModel.from_pretrained('stabilityai/stable-diffusion-2-1', subfolder='unet')
         self.feature_net = ControlNetModel.from_unet(unet=unet)
         
-    @torch.no_grad()
-    def encode_first_stage(self, x):
-        if hasattr(self, "split_input_params"):
-            if self.split_input_params["patch_distributed_vq"]:
-                ks = self.split_input_params["ks"]  # eg. (128, 128)
-                stride = self.split_input_params["stride"]  # eg. (64, 64)
-                df = self.split_input_params["vqf"]
-                self.split_input_params['original_image_size'] = x.shape[-2:]
-                bs, nc, h, w = x.shape
-                if ks[0] > h or ks[1] > w:
-                    ks = (min(ks[0], h), min(ks[1], w))
-                    print("reducing Kernel")
-
-                if stride[0] > h or stride[1] > w:
-                    stride = (min(stride[0], h), min(stride[1], w))
-                    print("reducing stride")
-
-                fold, unfold, normalization, weighting = self.get_fold_unfold(x, ks, stride, df=df)
-                z = unfold(x)  # (bn, nc * prod(**ks), L)
-                # Reshape to img shape
-                z = z.view((z.shape[0], -1, ks[0], ks[1], z.shape[-1]))  # (bn, nc, ks[0], ks[1], L )
-
-                output_list = [self.first_stage_model.encode(z[:, :, :, :, i])
-                               for i in range(z.shape[-1])]
-
-                o = torch.stack(output_list, axis=-1)
-                o = o * weighting
-
-                # Reverse reshape to img shape
-                o = o.view((o.shape[0], -1, o.shape[-1]))  # (bn, nc * ks[0] * ks[1], L)
-                # stitch crops together
-                decoded = fold(o)
-                decoded = decoded / normalization
-                return decoded
-
-            else:
-                return self.first_stage_model.encode(x)
-        else:
-            return self.first_stage_model.encode(x)
+        self.loss_l1_weight = 1e-1
+        
     
     def get_learned_conditioning(self, c, cond_type='image'):
         if cond_type == 'image':
@@ -229,13 +192,17 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
                 caption = self.q_sample(x_start=caption, t=tc, noise=torch.randn_like(c.float()))
                 cloth_caption = self.q_sample(x_start=cloth_caption, t=tc, noise=torch.randn_like(c.float()))
 
-
-        # if self.u_cond_prop < self.u_cond_percent:
-        #     self.opt.params = self.params_with_white
-        #     loss, loss_dict = self.p_losses(x, c, t, x_add, cloth, caption, cloth_caption)
-
-        # else:
         loss, loss_dict = self.p_losses(x, c, t, x_add, cloth, caption, cloth_caption)
+        
+        x_pred = self.sample_output(x, c, t, x_add, cloth, caption, cloth_caption)
+        output_pred = self.differentiable_decode_first_stage(x_pred)
+        
+        prefix = 'train' if self.training else 'val'
+        
+        l1_loss = self.l1_losses(output_pred, gt)
+        loss += l1_loss * self.loss_l1_weight
+        loss_dict.update({f'{prefix}/loss_l1': l1_loss})
+
         
         return loss, loss_dict
             
@@ -281,6 +248,10 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
 
         return loss, loss_dict
 
+    def l1_losses(self, pred, gt):
+        loss = (pred - gt).abs()
+        return loss.mean()
+    
     def apply_model(self, x_noisy, t, cond, feature_sample, return_ids=False):
         if isinstance(cond, dict):
             # hybrid case, cond is expected to be a dict
@@ -299,9 +270,21 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
             return x_recon
         
 
-    def sample_hijack(self, x_start, cond, t, controlnet_cond_f=None, controlnet_cond_b=None, skeleton_cf=None,
-                      skeleton_cb=None, skeleton_p=None, noise=None):
-        pass
+    def sample_output(self, x_start, img_cond, t, x_add, cloth, caption, cloth_caption, noise=None):
+        default(noise, lambda: torch.randn_like(x_start))
+        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
+        z_noisy = torch.cat([x_noisy, x_add], dim=1)
+        
+        # Get condition embedding
+        feature_samples = self.feature_net(cloth, encoder_hidden_states=cloth_caption, timestep=t)
+        cond = self.text_img_embed(img_cond, caption)
+        
+        # Get pred x_start
+        model_output = self.apply_model(z_noisy, t, cond, feature_samples) # model_output here must be eps (pred_noise)
+        x_denoisy = self.predict_start_from_noise(x_noisy, t, model_output)
+        
+        return x_denoisy
+        
 
     @torch.no_grad()
     def log_images(self, batch, N=4, n_row=4, sample=True, ddim_steps=200, ddim_eta=1., return_keys=None,
