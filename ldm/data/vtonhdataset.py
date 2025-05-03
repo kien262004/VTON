@@ -2,6 +2,7 @@ import os
 
 from PIL import Image
 import torch
+import numpy as np
 import torch.utils.data as data 
 import torch.nn.functional as F
 import torchvision.transforms as transforms
@@ -22,7 +23,8 @@ class VTHDDataset(data.Dataset):
     
     def __init__(self, 
                  dataroot:str, 
-                 image_size:Tuple[int, int] = (512, 384), 
+                 image_size:Tuple[int, int] = (512, 768), 
+                 cloth_size:Tuple[int, int] = (512, 384),
                  max_person:int = 5, 
                  mode:Literal["train", "test"] = "train", 
                  order:Literal["paired", "unpaired"] = "paired"):
@@ -32,6 +34,7 @@ class VTHDDataset(data.Dataset):
         self.fine_height = image_size[0]
         self.fine_width = image_size[1]
         self.max_person = max_person
+        self.cloth_size = cloth_size
         self.data_path = osp.join(dataroot, mode)
         self.order = order
         
@@ -75,7 +78,8 @@ class VTHDDataset(data.Dataset):
                             annotation_str += tag["tag_category"]
                             annotation_str += " "
                 self.annotation_pair[elem["file_name"]] = annotation_str
-                self.nums_annotation[elem["file_name"]] = elem['per_info']['nums']
+                #TODO: NEED TO SET number of person
+                # self.nums_annotation[elem["file_name"]] = elem['per_info']['nums']
         # get list of filename
         im_names = []
         c_names = []
@@ -83,8 +87,7 @@ class VTHDDataset(data.Dataset):
         with open(self.datalist, "r") as f:
             for line in f.readlines():
                 if mode == 'train':
-                    im_name, _ = line.strip().split()
-                    c_name = im_name
+                    im_name, c_name = line.strip().split()
                 else:
                     if order == 'paired':
                         im_name, _ = line.strip().split()
@@ -113,7 +116,7 @@ class VTHDDataset(data.Dataset):
         else:
             cloth_annotation = "shirts"
             
-        nums_person = self.nums_annotation[filename]
+        nums_person = 2
         
         # person image
         person = Image.open(osp(self.data_path, 'image', filename))
@@ -126,24 +129,30 @@ class VTHDDataset(data.Dataset):
         inpaint = self.transform(inpaint)
         
         # mask inpainting
-        mask = (person - inpaint)
-        mask[mask != 0] = 1 
-        mask = torch.max(mask, dim=-1)
+        mask = Image.open(osp(self.data_path, 'agnostic-mask', filename)).convert('L')
+        mask = transforms.Resize(self.crop_size, interpolation=0)(mask)
+        mask = self.transform_mask(mask).long()
         
         # cloth image
         cloth = Image.open(osp(self.data_path, 'cloth', filename_cloth))
         
         
-        # dense pose image (NEED MODIFINE)
-        # densepose_map = Image.open(osp(self.data_path, 'image-densepose', filename))
-        # densepose_map = self.transform_mask(densepose_map)
+        densepose_map = Image.open(osp(self.data_path, 'densepose', filename))
+        densepose_map = transforms.Resize(self.cloth_size, interpolation=0)(densepose_map)
+        densepose_map = self.transform(densepose_map)
+        
         
         segment = Image.open(osp(self.data_path, 'segment', filename)).convert('L')
-        segment = transforms.Resize(self.crop_size, interpolation=2)(segment)
-        segment = self.transform_mask(segment)
-        segment = F.one_hot(segment, segment.shape[0]).dtype(float)[1:]
+        segment = transforms.Resize(self.crop_size, interpolation=0)(segment)
+        segment =torch.from_numpy(np.array(segment)).long()
+        segment = F.one_hot(segment, 256).permute(2, 0, 1).to(float)
+        segment = segment[...,1:]
+        select = torch.sum(segment, dim = (1, 2)) > 0
+        segment = segment[select] 
+
         if (segment.shape[0] < self.max_person):
-            segment = torch.cat((segment, torch.zeros((self.max_person-segment.shape[0], *segment.shape[1:]))), dim=0)
+            padding = torch.zeros((self.max_person-segment.shape[0], *segment.shape[1:]))
+            segment = torch.cat((segment, padding), dim=0)
         
         if self.mode == 'train':
             if random.random() > 0.5:
@@ -185,6 +194,9 @@ class VTHDDataset(data.Dataset):
                 inpaint = TF.affine(
                     inpaint, angle=0, translate=[0, 0], scale=scale_val, shear=0
                 )
+                densepose_map = TF.affine(
+                    densepose_map, angle=0, translate=[0, 0], scale=scale_val, shear=0
+                )
 
 
             if random.random() > 0.5:
@@ -224,6 +236,17 @@ class VTHDDataset(data.Dataset):
                     scale=1,
                     shear=0,
                 )
+                densepose_map = TF.affine(
+                    densepose_map,
+                    angle=0,
+                    translate=[
+                        shift_valx * densepose_map.shape[-1],
+                        shift_valy * densepose_map.shape[-2],
+                    ],
+                    scale=1,
+                    shear=0,
+                )
+                
         
         cloth_trim = self.clip_transform(images=cloth, return_tensors="pt").pixel_values 
         
@@ -234,7 +257,8 @@ class VTHDDataset(data.Dataset):
         result['segment'] = segment
         result['inpaint'] = inpaint
         result['mask'] = mask
-        result["caption"] = f"{nums_person} people are wearing " + cloth_annotation
+        result['densepose'] = densepose_map
+        result["caption"] = f"There are {nums_person} people wearing " + cloth_annotation
         result["caption_cloth"] = "a photo of " + cloth_annotation
         result["annotation"] = cloth_annotation
         

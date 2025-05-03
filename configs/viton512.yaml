@@ -1,7 +1,8 @@
 model:
   base_learning_rate: 1.0e-05
-  target: ldm.models.diffusion.ddpm.LatentTryOnDiffusion
+  target: vton.model.LatentTryOnDiffusion
   params:
+    parameterization: "v"
     linear_start: 0.00085
     linear_end: 0.0120
     num_timesteps_cond: 1
@@ -14,7 +15,6 @@ model:
     cond_stage_trainable: true
     conditioning_key: crossattn
     monitor: val/loss_simple_ema
-    u_cond_percent: 0.2
     scale_factor: 0.18215
     use_ema: False
 
@@ -30,20 +30,21 @@ model:
     unet_config:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
       params:
-        image_size: 64 # unused
-        in_channels: 9
+        use_checkpoint: True
+        use_fp16: True
+        image_size: 32 # unused
+        in_channels: 18
         out_channels: 4
         model_channels: 320
         attention_resolutions: [ 4, 2, 1 ]
         num_res_blocks: 2
         channel_mult: [ 1, 2, 4, 4 ]
-        num_heads: 8
+        num_head_channels: 64 # need to fix for flash-attn
         use_spatial_transformer: True
+        use_linear_in_transformer: True
         transformer_depth: 1
         context_dim: 1024
-        use_checkpoint: True
         legacy: False
-        add_conv_in_front_of_unet: False
 
     first_stage_config:
       target: ldm.models.autoencoder.AutoencoderKL
@@ -92,25 +93,28 @@ data:
           target: ldm.data.vtonhdataset.VTHDDataset
           params:
               mode: train
-              dataroot: /mnt/pfs-mc0p4k/cvg/team/didonglin/why/datasets/mv_1000_split
-              image_size: 512
+              dataroot: datasets/mp_vton
+              image_size: (512, 768)
+              cloth_size: (512, 384)
       validation:
-          target: ldm.data.cp_dataset.CPDataset
+          target: ldm.data.vtonhdataset.VTHDDataset
           params:
               mode: test
-              dataroot: /mnt/pfs-mc0p4k/cvg/team/didonglin/why/datasets/mv_1000_split
-              image_size: 512
+              dataroot: datasets/mp_vton
+              image_size: (512, 768)
+              cloth_size: (512, 384)
       test:
-          target: ldm.data.cp_dataset.CPDataset
+          target: ldm.data.vtonhdataset.VTHDDataset
           params:
               mode: test
-              dataroot: /mnt/pfs-mc0p4k/cvg/team/didonglin/why/datasets/mv_1000_split
-              image_size: 512
+              dataroot: datasets/mp_vton
+              image_size: (512, 768)
+              cloth_size: (512, 384)
 
 lightning:
   trainer:
     max_epochs: 40
     num_nodes: 1
     accelerator: 'gpu'
-    gpus: "0,1"
+    gpus: "1"
     accumulate_grad_batches: 2

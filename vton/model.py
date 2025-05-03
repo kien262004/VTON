@@ -1,5 +1,6 @@
 import torch
 import random
+import torch.nn as nn
 from torchvision.transforms import Resize
 from diffusers import UNet2DConditionModel
 from ldm.models.diffusion.ddpm import LatentDiffusion, DDPM
@@ -7,6 +8,22 @@ from ldm.modules.distributions.distributions import normal_kl, DiagonalGaussianD
 from vton.feature_net import ControlNetModel
 from ldm.util import default
 
+class TextImageEmbedding(nn.Module):
+    def __init__(self, text_embed_dim: int = 768, image_embed_dim: int = 768, out_embed_dim: int = 1536):
+        super().__init__()
+        self.text_proj = nn.Linear(text_embed_dim, out_embed_dim)
+        self.text_norm = nn.LayerNorm(out_embed_dim)
+        self.image_proj = nn.Linear(image_embed_dim, out_embed_dim)
+
+    def forward(self, text_embeds: torch.FloatTensor, image_embeds: torch.FloatTensor):
+        # text
+        out_text_embeds = self.text_proj(text_embeds)
+        out_text_embeds = self.text_norm(out_text_embeds)
+
+        # image
+        out_image_embeds = self.image_proj(image_embeds)
+
+        return out_image_embeds + out_text_embeds
 
 __conditioning_keys__ = {'concat': 'c_concat',
                          'crossattn': 'c_crossattn',
@@ -19,6 +36,9 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         
         self.cond_text_stage_model = self.instantiate_cond_stage(cond_text_stage_config)
         
+        self.text_img_embed = TextImageEmbedding(self.cond_text_stage_model.transformer.config.hidden_size,
+                                                 self.cond_stage_model.out_dim,
+                                                 self.cond_stage_model.out_dim)
         unet = UNet2DConditionModel.from_pretrained('stabilityai/stable-diffusion-2-1')
         self.feature_net = ControlNetModel.from_unet(unet=unet)
         
@@ -99,6 +119,7 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         segment = DDPM.get_input(self, batch, 'segment')
         inpaint = DDPM.get_input(self, batch, 'inpaint')
         mask = DDPM.get_input(self, batch, 'mask')
+        densepose = DDPM.get_input(self, batch, 'densepose')
         
         caption = batch['caption']
         cloth_caption = batch['cloth_caption']
@@ -116,9 +137,12 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         z = self.get_first_stage_encoding(encoder_posterior).detach()
         encoder_inpaint = self.encode_first_stage(inpaint)
         z_inpaint = self.get_first_stage_encoding(encoder_inpaint).detach()
+        encoder_densepose = self.encode_first_stage(densepose)
+        z_densepose = self.get_first_stage_encoding(encoder_densepose).detach()
         mask_resize = Resize((z.shape[-1], z.shape[-1]))(mask)
+        segment = Resize((z.shape[-1], z.shape[-1]))(segment)
         
-        z_addiction = torch.cat((z_inpaint, mask_resize, segment), dim=1)
+        z_addiction = torch.cat((z_inpaint, mask_resize, z_densepose, segment), dim=1)
         z_new = z
         z_diff = z_inpaint
         
@@ -207,16 +231,16 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
                 cloth_caption = self.q_sample(x_start=cloth_caption, t=tc, noise=torch.randn_like(c.float()))
 
 
-        if self.u_cond_prop < self.u_cond_percent:
-            self.opt.params = self.params_with_white
-            loss, loss_dict = self.p_losses(x, c, t, x_add, cloth, caption, cloth_caption)
+        # if self.u_cond_prop < self.u_cond_percent:
+        #     self.opt.params = self.params_with_white
+        #     loss, loss_dict = self.p_losses(x, c, t, x_add, cloth, caption, cloth_caption)
 
-        else:
-            loss, loss_dict = self.p_losses(x, c, t, x_add, cloth, caption, cloth_caption)
+        # else:
+        loss, loss_dict = self.p_losses(x, c, t, x_add, cloth, caption, cloth_caption)
         
         return loss, loss_dict
             
-    def p_losses(self, x_start, cond, t, x_add, cloth, caption, cloth_caption, noise=None):
+    def p_losses(self, x_start, img_cond, t, x_add, cloth, caption, cloth_caption, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         if self.first_stage_key == 'inpaint':
@@ -224,7 +248,7 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         
         # Get condition embedding
         feature_samples = self.feature_net(cloth, encoder_hidden_states=cloth_caption, timestep=t)
-        
+        cond = self.text_img_embed(img_cond, caption)
         model_output = self.apply_model(x_noisy, t, cond, feature_samples)
         loss_dict = {}
         prefix = 'train' if self.training else 'val'

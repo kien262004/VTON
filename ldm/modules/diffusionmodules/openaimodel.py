@@ -1175,6 +1175,9 @@ class ConfigUNetModel(nn.Module):
         hs = []
         t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
         emb = self.time_embed(t_emb)
+        
+        down_cond_samples = features.down_block_res_samples
+        mid_cond_sample = features.mid_block_res_sample
         for layer in features:
             print(f'feature_layers: {layer.shape}')
         if self.num_classes is not None:
@@ -1182,15 +1185,18 @@ class ConfigUNetModel(nn.Module):
             emb = emb + self.label_emb(y)
 
         h = x.type(self.dtype)
-        for module in self.input_blocks:
+        for idx, module in enumerate(self.input_blocks):
+            c = th.cat([context, down_cond_samples[idx]], dim=1)
             h = module(h, emb, context)
-            print(f'Main Unet: {h.shape}')
             hs.append(h)
         
-        h = self.middle_block(h, emb, context)
-
-        for module in self.output_blocks:
+        c = th.cat([context, mid_cond_sample], dim=1)
+        h = self.middle_block(h, emb, c)
+        
+        down_cond_samples = reversed(down_cond_samples)
+        for idx, module in enumerate(self.output_blocks):
             h = th.cat([h, hs.pop()], dim=1)
+            c = th.cat([context, down_cond_samples[idx]], dim=1)
             h = module(h, emb, context)
         h = h.type(x.dtype)
         if self.predict_codebook_ids:

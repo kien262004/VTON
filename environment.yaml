@@ -92,7 +92,7 @@ dependencies:
       - clip==0.2.0
       - cloudpickle==3.0.0
       - contourpy==1.1.1
-      - cupy==12.3.0
+      - cupy-cuda113==12.3.0
       - cycler==0.12.1
       - diffusers==0.20.0
       - einops==0.3.0

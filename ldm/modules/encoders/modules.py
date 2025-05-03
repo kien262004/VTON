@@ -142,6 +142,7 @@ class FrozenCLIPImageEmbedder(AbstractEncoder):
         super().__init__()
         self.num_tokens = num_tokens
         self.out_dims = out_dims
+        self.device = device
         self.encoder = CLIPVisionModelWithProjection.from_pretrained(version).to(
             device, dtype=torch.float16
         )

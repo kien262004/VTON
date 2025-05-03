@@ -336,14 +336,14 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
             raise ValueError(f"addition_embed_type: {addition_embed_type} must be None, 'text' or 'text_image'.")
 
         # control net conditioning embedding
-        self.controlnet_cond_embedding = ControlNetConditioningEmbedding(
-            conditioning_embedding_channels=block_out_channels[0],
-            block_out_channels=conditioning_embedding_out_channels,
-            conditioning_channels=conditioning_channels,
-        )
+        # self.controlnet_cond_embedding = ControlNetConditioningEmbedding(
+        #     conditioning_embedding_channels=block_out_channels[0],
+        #     block_out_channels=conditioning_embedding_out_channels,
+        #     conditioning_channels=conditioning_channels,
+        # )
 
         self.down_blocks = nn.ModuleList([])
-        self.controlnet_down_blocks = nn.ModuleList([])
+        # self.controlnet_down_blocks = nn.ModuleList([])
 
         if isinstance(only_cross_attention, bool):
             only_cross_attention = [only_cross_attention] * len(down_block_types)
@@ -388,20 +388,20 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
             )
             self.down_blocks.append(down_block)
 
-            for _ in range(layers_per_block):
-                controlnet_block = nn.Conv2d(output_channel, output_channel, kernel_size=1)
-                controlnet_block = zero_module(controlnet_block)
-                self.controlnet_down_blocks.append(controlnet_block)
+            # for _ in range(layers_per_block):
+                # controlnet_block = nn.Linear(output_channel * 4, cross_attention_dim)
+                # controlnet_block = zero_module(controlnet_block)
+            self.controlnet_down_block = nn.Linear(output_channel * 4, cross_attention_dim)
 
-            if not is_final_block:
-                controlnet_block = nn.Conv2d(output_channel, output_channel, kernel_size=1)
-                controlnet_block = zero_module(controlnet_block)
-                self.controlnet_down_blocks.append(controlnet_block)
+            # if not is_final_block:
+            #     controlnet_block = nn.Linear(output_channel * 4, cross_attention_dim)
+            #     controlnet_block = zero_module(controlnet_block)
+            #     self.controlnet_down_blocks.append(controlnet_block)
 
         # mid
         mid_block_channel = block_out_channels[-1]
 
-        controlnet_block = nn.Conv2d(mid_block_channel, mid_block_channel, kernel_size=1)
+        controlnet_block = nn.Conv2d(mid_block_channel, mid_block_channel, cross_attention_dim)
         controlnet_block = zero_module(controlnet_block)
         self.controlnet_mid_block = controlnet_block
 
@@ -434,6 +434,8 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
             )
         else:
             raise ValueError(f"unknown mid_block_type : {mid_block_type}")
+        
+        self.flat_block = FlatBlock(scale=2)
 
     @classmethod
     def from_unet(
@@ -642,7 +644,6 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
         sample: torch.Tensor,
         timestep: Union[torch.Tensor, float, int],
         encoder_hidden_states: torch.Tensor,
-        controlnet_cond: torch.Tensor,
         conditioning_scale: float = 1.0,
         class_labels: Optional[torch.Tensor] = None,
         timestep_cond: Optional[torch.Tensor] = None,
@@ -773,8 +774,8 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
         # 2. pre-process
         sample = self.conv_in(sample)
 
-        controlnet_cond = self.controlnet_cond_embedding(controlnet_cond)
-        sample = controlnet_cond
+        # controlnet_cond = self.controlnet_cond_embedding(controlnet_cond)
+        # sample = controlnet_cond
 
         # 3. down
         down_block_res_samples = (sample,)
@@ -790,7 +791,8 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
             else:
                 sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
 
-            down_block_res_samples += res_samples
+            res_samples = self.flat_block(res_samples)
+            down_block_res_samples += (res_samples)
 
         # 4. mid
         if self.mid_block is not None:
@@ -809,13 +811,14 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
 
         controlnet_down_block_res_samples = ()
 
-        for down_block_res_sample, controlnet_block in zip(down_block_res_samples, self.controlnet_down_blocks):
-            down_block_res_sample = controlnet_block(down_block_res_sample)
+        for down_block_res_sample in down_block_res_samples:
+            down_block_res_sample = self.controlnet_down_block(down_block_res_sample)
             controlnet_down_block_res_samples = controlnet_down_block_res_samples + (down_block_res_sample,)
 
         down_block_res_samples = controlnet_down_block_res_samples
 
         mid_block_res_sample = self.controlnet_mid_block(sample)
+        mid_block_res_sample = self.flat_block(mid_block_res_sample)
 
         # 6. scaling
         if guess_mode and not self.config.global_pool_conditions:
@@ -845,3 +848,32 @@ def zero_module(module):
     for p in module.parameters():
         nn.init.zeros_(p)
     return module
+
+class FlatBlock(nn.Module):
+    def __init__(self, scale, isToken=True):
+        super().__init__()
+        self.scale = scale
+        self.isToken = isToken
+
+    def forward(self, x):
+        if isinstance(x, tuple):
+            result = ()
+            for i, p in enumerate(x):
+                n, c, h, w = p.size()
+                p = p.view(n, c, h // self.scale, self.scale, w // self.scale, self.scale)
+                p = p.permute(0, 3, 5, 1, 2, 4).contiguous()
+                p = p.view(n, c * (self.scale ** 2), h // self.scale, w // self.scale)
+                if self.isToken:
+                    p = p.flatten(2)
+                    p = p.permute(0, 2, 1)
+                result += (p,)
+        else:
+            n, c, h, w = x.size()
+            x = x.view(n, c, h // self.scale, self.scale, w // self.scale, self.scale)
+            x = x.permute(0, 3, 5, 1, 2, 4).contiguous()
+            result = x.view(n, c * (self.scale ** 2), h // self.scale, w // self.scale)
+            if self.isToken:
+                result = result.flatten(2)
+                result = result.permute(0, 2, 1)
+
+        return result
