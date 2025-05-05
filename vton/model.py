@@ -315,7 +315,7 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
             key = 'c_concat' if self.model.conditioning_key == 'concat' else 'c_crossattn'
             cond = {key: cond}
 
-        x_recon = self.model(x_noisy, t, cond, feature_sample)
+        x_recon = self.model(x_noisy, t, **cond, feature_sample=feature_sample)
 
         if isinstance(x_recon, tuple) and not return_ids:
             return x_recon[0]

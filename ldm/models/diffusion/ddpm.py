@@ -1349,7 +1349,7 @@ class DiffusionWrapper(pl.LightningModule):
         self.conditioning_key = conditioning_key
         assert self.conditioning_key in [None, 'concat', 'crossattn', 'hybrid', 'adm', 'hybrid-adm', 'crossattn-adm']
 
-    def forward(self, x, t, c_concat: list = None, c_crossattn: list = None, c_adm=None):
+    def forward(self, x, t, c_concat: list = None, c_crossattn: list = None, c_adm=None, feature_sample=None):
         if self.conditioning_key is None:
             out = self.diffusion_model(x, t)
         elif self.conditioning_key == 'concat':
@@ -1366,7 +1366,7 @@ class DiffusionWrapper(pl.LightningModule):
                 # an error: RuntimeError: forward() is missing value for argument 'argument_3'.
                 out = self.scripted_diffusion_model(x, t, cc)
             else:
-                out = self.diffusion_model(x, t, context=cc)
+                out = self.diffusion_model(x, t, context=cc, feature=feature_sample)
         elif self.conditioning_key == 'hybrid':
             xc = torch.cat([x] + c_concat, dim=1)
             cc = torch.cat(c_crossattn, 1)
