@@ -531,10 +531,13 @@ if __name__ == "__main__":
 
     model.requires_grad_(False)
     for name, param in model.named_parameters():
-        if "diffusion_model.output_blocks" in name and "transformer_blocks" in name: 
+        if "diffusion_model" in name and "transformer_blocks" in name: 
             param.requires_grad = True
-        if "local_controlnet" in name or "pose" in name: 
+        if "feature_net" in name: 
             param.requires_grad = True
+        if "input_blocks.0.0" in name:
+            param.requires_grad = True
+        
         # 打开一个文件来写入模块名称
     with open("module_names.txt", "w") as file:
         # 遍历模型的所有模块并将名称写入文件
@@ -713,7 +716,7 @@ if __name__ == "__main__":
         if trainer.global_rank == 0:
             print("Summoning checkpoint.")
             ckpt_path = os.path.join(ckptdir, "last.ckpt")
-            trainer.save_checkpoint(ckpt_path)
+            # trainer.save_checkpoint(ckpt_path)
 
 
     def divein(*args, **kwargs):

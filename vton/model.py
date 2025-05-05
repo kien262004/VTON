@@ -274,7 +274,7 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         return loss, loss_dict
 
     def l1_losses(self, pred, gt):
-        loss = (pred - gt).abs()
+        loss = (pred - gt.detach()).abs()
         return loss.mean()
     
     def segment_losses(self, pred, gt, mask, segment, alpha=10):
@@ -289,7 +289,7 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
             weighted_map[weighted_map > 0] = torch.exp(-alpha * weighted_map[weighted_map > 0])
             return weighted_map
             
-        loss = (pred - gt).abs()
+        loss = (pred - gt.detach()).abs()
         uni_map = mask.unsqueeze(1) & segment
         weighted_map = _calcute_weighted_map(uni_map)
         loss = loss * weighted_map

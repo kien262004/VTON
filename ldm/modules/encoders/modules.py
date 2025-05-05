@@ -157,20 +157,21 @@ class FrozenCLIPImageEmbedder(AbstractEncoder):
             param.requires_grad = False
 
     def init_proj(self):
+        # TODO: fix parameters
         image_proj_model = CustomResampler(
             dim=self.encoder.config.hidden_size,
-            depth=4,
+            depth=2,
             dim_head=64,
-            heads=12,
+            heads=8,
             num_queries=self.num_tokens,
             embedding_dim=self.encoder.config.hidden_size,
             output_dim=self.out_dims,
-            ff_mult=4,
-        ).to(self.device, dtype=torch.float16)
+            ff_mult=1,
+        ).to(self.device)
         return image_proj_model
 
     def forward(self, clip_image):
-        clip_image = clip_image.to(self.device, dtype=torch.float16)
+        clip_image = clip_image.to(self.device)
         clip_image_embeds = self.encoder(clip_image, output_hidden_states=True).hidden_states[-2]
         z = self.image_proj_model(clip_image_embeds)
         return z

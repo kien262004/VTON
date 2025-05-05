@@ -107,8 +107,8 @@ data:
           params:
               mode: test
               dataroot: datasets/mp_vton
-              image_size: (512, 768)
-              cloth_size: (512, 384)
+              image_size: [512, 768]
+              cloth_size: [512, 384]
 
 lightning:
   trainer:
@@ -116,4 +116,6 @@ lightning:
     num_nodes: 1
     accelerator: 'gpu'
     gpus: "0"
+    precision: 16
     accumulate_grad_batches: 2
+    
