@@ -400,9 +400,8 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
 
         # mid
         mid_block_channel = block_out_channels[-1]
-
-        controlnet_block = nn.Conv2d(mid_block_channel, mid_block_channel, cross_attention_dim)
-        controlnet_block = zero_module(controlnet_block)
+        controlnet_block = nn.Linear(mid_block_channel * 4, cross_attention_dim)
+        # controlnet_block = zero_module(controlnet_block)
         self.controlnet_mid_block = controlnet_block
 
         if mid_block_type == "UNetMidBlock2DCrossAttn":
@@ -778,7 +777,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
         # sample = controlnet_cond
 
         # 3. down
-        down_block_res_samples = (sample,)
+        down_block_res_samples = (self.flat_block(sample),)
         for downsample_block in self.down_blocks:
             if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
                 sample, res_samples = downsample_block(
@@ -817,8 +816,8 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
 
         down_block_res_samples = controlnet_down_block_res_samples
 
-        mid_block_res_sample = self.controlnet_mid_block(sample)
         mid_block_res_sample = self.flat_block(mid_block_res_sample)
+        mid_block_res_sample = self.controlnet_mid_block(sample)
 
         # 6. scaling
         if guess_mode and not self.config.global_pool_conditions:

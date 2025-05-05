@@ -84,7 +84,7 @@ class VTHDDataset(data.Dataset):
         im_names = []
         c_names = []
         
-        with open(self.datalist, "r") as f:
+        with open(osp.join(dataroot, self.datalist), "r") as f:
             for line in f.readlines():
                 if mode == 'train':
                     im_name, c_name = line.strip().split()
@@ -104,7 +104,7 @@ class VTHDDataset(data.Dataset):
         
     
     def __len__(self):
-        len(os.listdir(osp(self.data_path, 'image')))
+        return len(os.listdir(osp.join(self.data_path, 'image')))
     
     def __getitem__(self, index):
         filename = self.im_names[index]
@@ -119,30 +119,30 @@ class VTHDDataset(data.Dataset):
         nums_person = 2
         
         # person image
-        person = Image.open(osp(self.data_path, 'image', filename))
+        person = Image.open(osp.join(self.data_path, 'image', filename))
         person = transforms.Resize(self.crop_size, interpolation=2)(person)
         person = self.transform(person)
         
         # inpainting image
-        inpaint = Image.open(osp(self.data_path, 'agnostic', filename))
+        inpaint = Image.open(osp.join(self.data_path, 'agnostic', filename))
         inpaint = transforms.Resize(self.crop_size, interpolation=2)(inpaint)
         inpaint = self.transform(inpaint)
         
         # mask inpainting
-        mask = Image.open(osp(self.data_path, 'agnostic-mask', os.path.splitext(filename)[0] + '.png')).convert('L')
+        mask = Image.open(osp.join(self.data_path, 'agnostic-mask', os.path.splitext(filename)[0] + '.png')).convert('L')
         mask = transforms.Resize(self.crop_size, interpolation=0)(mask)
         mask = self.transform_mask(mask).long()
         
         # cloth image
-        cloth = Image.open(osp(self.data_path, 'cloth', filename_cloth))
+        cloth = Image.open(osp.join(self.data_path, 'cloth', filename_cloth))
         
         
-        densepose_map = Image.open(osp(self.data_path, 'densepose', filename))
+        densepose_map = Image.open(osp.join(self.data_path, 'densepose', filename))
         densepose_map = transforms.Resize(self.cloth_size, interpolation=0)(densepose_map)
         densepose_map = self.transform(densepose_map)
         
         
-        segment = Image.open(osp(self.data_path, 'segment', os.path.splitext(filename)[0] + '.png')).convert('L')
+        segment = Image.open(osp.join(self.data_path, 'segment', os.path.splitext(filename)[0] + '.png')).convert('L')
         segment = transforms.Resize(self.crop_size, interpolation=0)(segment)
         segment = torch.from_numpy(np.array(segment)).long()
         segment = F.one_hot(segment, 256).permute(2, 0, 1).to(float)
