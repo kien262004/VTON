@@ -50,7 +50,7 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         self.feature_net = ControlNetModel.from_unet(unet=unet)
         
         self.vgg = VGG19_feature_color_torchversion(vgg_normal_correct=True)
-        self.vgg.load_state_dict(torch.load("models/vgg/vgg19_conv.pth", map_location="cpu"))
+        self.vgg.load_state_dict(torch.load("pretrain/vgg/vgg19_conv.pth", map_location="cpu"))
         self.vgg.eval()
         
         self.loss_l1_weight = 1e-1
