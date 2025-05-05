@@ -135,10 +135,13 @@ class VTHDDataset(data.Dataset):
         
         # cloth image
         cloth = Image.open(osp.join(self.data_path, 'cloth', filename_cloth))
+        cloth = transforms.Resize(self.cloth_size, interpolation=2)(cloth)
+        cloth_trim = self.clip_transform(images=cloth, return_tensors="pt").pixel_values 
+        cloth = self.transform(cloth)
         
         
         densepose_map = Image.open(osp.join(self.data_path, 'densepose', filename))
-        densepose_map = transforms.Resize(self.cloth_size, interpolation=0)(densepose_map)
+        densepose_map = transforms.Resize(self.crop_size, interpolation=0)(densepose_map)
         densepose_map = self.transform(densepose_map)
         
         
@@ -248,7 +251,6 @@ class VTHDDataset(data.Dataset):
                 )
                 
         
-        cloth_trim = self.clip_transform(images=cloth, return_tensors="pt").pixel_values 
         
         result = {}
         result['person'] = person

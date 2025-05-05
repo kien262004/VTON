@@ -93,15 +93,15 @@ data:
           params:
               mode: train
               dataroot: datasets/mp_vton
-              image_size: (512, 768)
-              cloth_size: (512, 384)
+              image_size: [512, 768]
+              cloth_size: [512, 384]
       validation:
           target: ldm.data.vtonhdataset.VTHDDataset
           params:
               mode: test
               dataroot: datasets/mp_vton
-              image_size: (512, 768)
-              cloth_size: (512, 384)
+              image_size: [512, 768]
+              cloth_size: [512, 384]
       test:
           target: ldm.data.vtonhdataset.VTHDDataset
           params:

@@ -343,7 +343,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
         # )
 
         self.down_blocks = nn.ModuleList([])
-        # self.controlnet_down_blocks = nn.ModuleList([])
+        self.controlnet_down_blocks = nn.ModuleList([])
 
         if isinstance(only_cross_attention, bool):
             only_cross_attention = [only_cross_attention] * len(down_block_types)
@@ -357,9 +357,9 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
         # down
         output_channel = block_out_channels[0]
 
-        controlnet_block = nn.Conv2d(output_channel, output_channel, kernel_size=1)
+        controlnet_block = nn.Linear(output_channel * 4, cross_attention_dim)
         controlnet_block = zero_module(controlnet_block)
-        # self.controlnet_down_blocks.append(controlnet_block)
+        self.controlnet_down_blocks.append(controlnet_block)
 
         for i, down_block_type in enumerate(down_block_types):
             input_channel = output_channel
@@ -391,12 +391,12 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
             # for _ in range(layers_per_block):
                 # controlnet_block = nn.Linear(output_channel * 4, cross_attention_dim)
                 # controlnet_block = zero_module(controlnet_block)
-            self.controlnet_down_block = nn.Linear(output_channel * 4, cross_attention_dim)
+            controlnet_block = nn.Linear(output_channel * 4, cross_attention_dim)
 
-            # if not is_final_block:
-            #     controlnet_block = nn.Linear(output_channel * 4, cross_attention_dim)
-            #     controlnet_block = zero_module(controlnet_block)
-            #     self.controlnet_down_blocks.append(controlnet_block)
+            if not is_final_block:
+                controlnet_block = nn.Linear(output_channel * 4, cross_attention_dim)
+                controlnet_block = zero_module(controlnet_block)
+                self.controlnet_down_blocks.append(controlnet_block)
 
         # mid
         mid_block_channel = block_out_channels[-1]
@@ -790,9 +790,9 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
             else:
                 sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
 
-            res_samples = self.flat_block(res_samples)
+            res_samples = self.flat_block(res_samples[-1])
             down_block_res_samples += (res_samples)
-
+        print(down_block_res_samples)        
         # 4. mid
         if self.mid_block is not None:
             if hasattr(self.mid_block, "has_cross_attention") and self.mid_block.has_cross_attention:
@@ -810,8 +810,9 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
 
         controlnet_down_block_res_samples = ()
 
-        for down_block_res_sample in down_block_res_samples:
-            down_block_res_sample = self.controlnet_down_block(down_block_res_sample)
+        for down_block_res_sample, controlnet_block in zip(
+                down_block_res_samples, self.controlnet_down_blocks):
+            down_block_res_sample = controlnet_block(down_block_res_sample)
             controlnet_down_block_res_samples = controlnet_down_block_res_samples + (down_block_res_sample,)
 
         down_block_res_samples = controlnet_down_block_res_samples

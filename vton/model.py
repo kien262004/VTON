@@ -109,12 +109,19 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         
         encoder_posterior = self.encode_first_stage(x)
         z = self.get_first_stage_encoding(encoder_posterior).detach()
+        
         encoder_inpaint = self.encode_first_stage(inpaint)
         z_inpaint = self.get_first_stage_encoding(encoder_inpaint).detach()
+        
         encoder_densepose = self.encode_first_stage(densepose)
         z_densepose = self.get_first_stage_encoding(encoder_densepose).detach()
-        mask_resize = Resize((z.shape[-1], z.shape[-1]))(mask)
-        segment_resize = Resize((z.shape[-1], z.shape[-1]))(segment)
+        
+        encoder_cloth = self.encode_first_stage(cloth)
+        z_cloth = self.get_first_stage_encoding(encoder_cloth).detach()
+        
+        mask_resize = F.interpolate(mask, size=z.shape[-2:], mode="bilinear", align_corners=False)
+        segment_resize = F.interpolate(segment, size=z.shape[-2:], mode="bilinear", align_corners=False)
+        
         
         z_addiction = torch.cat((z_inpaint, mask_resize, z_densepose, segment_resize), dim=1)
         z_new = z
@@ -165,7 +172,7 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         if get_mask:
             out.append(mask)
         if get_reference:
-            out.append(cloth)
+            out.append(z_cloth)
         if get_segment:
             out.append(segment)
         if get_annotations:
@@ -178,13 +185,12 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         # Set segment in z_add (concat with main input set for test)
         # Have to repair code in get_input if want to fusion segment with cloth branch
         
-        z_tgt, z_src, z_add, cond, x_tgt, cloth, mask, segment, annotations = self.get_input(batch, get_reference=True, get_annotations=True, get_mask=True, get_segment=True)
-        loss, loss_dict = self(z_tgt, z_src, z_add, cond, x_tgt,  cloth, mask, segment, annotations, **kwargs)
+        z_tgt, z_src, z_add, cond, x_tgt,mask, cloth, segment, annotations = self.get_input(batch, get_reference=True, get_annotations=True, get_mask=True, get_segment=True)
+        loss, loss_dict = self(z_tgt, z_src, z_add, cond, x_tgt, cloth, mask, segment, annotations, **kwargs)
         return loss, loss_dict
         
 
     def forward(self, x, x_src, x_add, c, gt, cloth, mask, segment, annotations, *args, **kwargs):
-        self.opt.params = self.params
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
         
         caption = annotations['caption']
