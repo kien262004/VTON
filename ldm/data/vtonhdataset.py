@@ -129,7 +129,7 @@ class VTHDDataset(data.Dataset):
         inpaint = self.transform(inpaint)
         
         # mask inpainting
-        mask = Image.open(osp(self.data_path, 'agnostic-mask', filename)).convert('L')
+        mask = Image.open(osp(self.data_path, 'agnostic-mask', os.path.splitext(filename)[0] + '.png')).convert('L')
         mask = transforms.Resize(self.crop_size, interpolation=0)(mask)
         mask = self.transform_mask(mask).long()
         
@@ -142,11 +142,11 @@ class VTHDDataset(data.Dataset):
         densepose_map = self.transform(densepose_map)
         
         
-        segment = Image.open(osp(self.data_path, 'segment', filename)).convert('L')
+        segment = Image.open(osp(self.data_path, 'segment', os.path.splitext(filename)[0] + '.png')).convert('L')
         segment = transforms.Resize(self.crop_size, interpolation=0)(segment)
-        segment =torch.from_numpy(np.array(segment)).long()
+        segment = torch.from_numpy(np.array(segment)).long()
         segment = F.one_hot(segment, 256).permute(2, 0, 1).to(float)
-        segment = segment[...,1:]
+        segment = segment[1:]
         select = torch.sum(segment, dim = (1, 2)) > 0
         segment = segment[select] 
 
