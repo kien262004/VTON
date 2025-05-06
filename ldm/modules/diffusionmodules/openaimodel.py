@@ -1021,6 +1021,7 @@ class ConfigUNetModel(nn.Module):
             conv_nd(dims, model_channels, n_embed, 1),
             #nn.LogSoftmax(dim=1)  # change to cross_entropy and produce non-normalized logits
         )
+        self.convert_to_fp16() if use_fp16 else self.convert_to_fp32()
 
     def convert_to_fp16(self):
         """
@@ -1062,8 +1063,7 @@ class ConfigUNetModel(nn.Module):
 
         h = x.type(self.dtype)
         for idx, module in enumerate(self.input_blocks):
-            c = th.cat([context, down_cond_samples[idx]], dim=1)
-            h = module(h, emb, c)
+            h = module(h, emb, context)
             hs.append(h)
         
         c = th.cat([context, mid_cond_sample], dim=1)

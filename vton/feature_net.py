@@ -794,8 +794,9 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
                 )
             else:
                 sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
-                res_samples = self.flat_block(res_samples)
-                down_block_res_samples += (res_samples,)
+
+            res_samples = self.flat_block(res_samples)
+            down_block_res_samples += res_samples
 
         # 4. mid
         if self.mid_block is not None:

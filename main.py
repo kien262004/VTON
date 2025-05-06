@@ -531,7 +531,7 @@ if __name__ == "__main__":
 
     model.requires_grad_(False)
     for name, param in model.named_parameters():
-        if "diffusion_model" in name and "transformer_blocks" in name: 
+        if "diffusion_model" in name: 
             param.requires_grad = True
         if "feature_net" in name: 
             param.requires_grad = True
