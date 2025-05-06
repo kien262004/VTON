@@ -435,6 +435,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
             raise ValueError(f"unknown mid_block_type : {mid_block_type}")
         
         self.flat_block = FlatBlock(scale=2)
+        self.prj_context = nn.Linear(768, 1024)
 
     @classmethod
     def from_unet(
@@ -772,7 +773,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
 
         # 2. pre-process
         sample = self.conv_in(sample)
-
+        encoder_hidden_states = self.prj_context(encoder_hidden_states)
         # controlnet_cond = self.controlnet_cond_embedding(controlnet_cond)
         # sample = controlnet_cond
 

@@ -44,8 +44,8 @@ class LatentTryOnDiffusion(LatentDiffusion): # model for MP-VTON
         self.cond_text_stage_model = self.instantiate_cond_stage(cond_text_stage_config)
         
         self.text_img_embed = TextImageEmbedding(self.cond_text_stage_model.transformer.config.hidden_size,
-                                                 self.cond_stage_model.out_dim,
-                                                 self.cond_stage_model.out_dim)
+                                                 self.cond_stage_model.out_dims,
+                                                 self.cond_stage_model.out_dims)
         unet = UNet2DConditionModel.from_pretrained('stabilityai/stable-diffusion-2-1', subfolder='unet')
         self.feature_net = ControlNetModel.from_unet(unet=unet)
         
