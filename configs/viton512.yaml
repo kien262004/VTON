@@ -27,7 +27,7 @@ model:
         f_min: [ 1. ]
 
     unet_config:
-      target: ldm.modules.diffusionmodules.openaimodel.UNetModel
+      target: ldm.modules.diffusionmodules.openaimodel.ConfigUNetModel
       params:
         use_fp16: True
         image_size: 32 # unused
@@ -72,12 +72,12 @@ model:
       params: 
           num_tokens: 16
           out_dims: 786
-          version: "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
+          version: "openai/clip-vit-large-patch14"
     
     cond_text_stage_config:
       target: ldm.modules.encoders.modules.FrozenCLIPEmbedder
       params:
-          version: "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
+          version: "openai/clip-vit-large-patch14"
           layer: "pooled"
 
     
