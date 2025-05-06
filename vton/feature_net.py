@@ -357,7 +357,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
         # down
         output_channel = block_out_channels[0]
 
-        controlnet_block = nn.Linear(output_channel * 4, cross_attention_dim)
+        controlnet_block = nn.Linear(output_channel * 4, 768)
         controlnet_block = zero_module(controlnet_block)
         self.controlnet_down_blocks.append(controlnet_block)
 
@@ -388,8 +388,10 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
             )
             self.down_blocks.append(down_block)
 
-            # for _ in range(layers_per_block):
-                # controlnet_block = nn.Linear(output_channel * 4, cross_attention_dim)
+            for _ in range(layers_per_block):
+                controlnet_block = nn.Linear(output_channel * 4, 768)
+                self.controlnet_down_blocks.append(controlnet_block)
+
                 # controlnet_block = zero_module(controlnet_block)
             # controlnet_block = nn.Linear(output_channel * 4, cross_attention_dim)
 
@@ -400,7 +402,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
 
         # mid
         mid_block_channel = block_out_channels[-1]
-        controlnet_block = nn.Linear(mid_block_channel * 4, cross_attention_dim)
+        controlnet_block = nn.Linear(mid_block_channel * 4, 768)
         # controlnet_block = zero_module(controlnet_block)
         self.controlnet_mid_block = controlnet_block
 
@@ -436,6 +438,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
         
         self.flat_block = FlatBlock(scale=2)
         self.prj_context = nn.Linear(768, 1024)
+
 
     @classmethod
     def from_unet(
@@ -779,8 +782,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
 
         # 3. down
         down_block_res_samples = (self.flat_block(sample),)
-        for idx, downsample_block in enumerate(self.down_blocks):
-            is_last_block = idx == len(self.down_blocks) - 1
+        for downsample_block in self.down_blocks:
             
             if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
                 sample, res_samples = downsample_block(
@@ -792,8 +794,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
                 )
             else:
                 sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
-            if not is_last_block:
-                res_samples = self.flat_block(res_samples[-1])
+                res_samples = self.flat_block(res_samples)
                 down_block_res_samples += (res_samples,)
 
         # 4. mid
