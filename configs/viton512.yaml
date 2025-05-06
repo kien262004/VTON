@@ -29,7 +29,6 @@ model:
     unet_config:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
       params:
-        use_checkpoint: True
         use_fp16: True
         image_size: 32 # unused
         in_channels: 18
@@ -42,7 +41,7 @@ model:
         use_spatial_transformer: True
         use_linear_in_transformer: True
         transformer_depth: 1
-        context_dim: 1024
+        context_dim: 786
         legacy: False
 
     first_stage_config:
@@ -72,7 +71,7 @@ model:
       target: ldm.modules.encoders.modules.FrozenCLIPImageEmbedder
       params: 
           num_tokens: 16
-          out_dims: 1024
+          out_dims: 786
           version: "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
     
     cond_text_stage_config:
@@ -93,22 +92,22 @@ data:
           params:
               mode: train
               dataroot: datasets/mp_vton
-              image_size: [512, 768]
-              cloth_size: [512, 384]
+              image_size: [256, 256]
+              cloth_size: [256, 256]
       validation:
           target: ldm.data.vtonhdataset.VTHDDataset
           params:
               mode: test
               dataroot: datasets/mp_vton
-              image_size: [512, 768]
-              cloth_size: [512, 384]
+              image_size: [256, 256]
+              cloth_size: [256, 256]
       test:
           target: ldm.data.vtonhdataset.VTHDDataset
           params:
               mode: test
               dataroot: datasets/mp_vton
-              image_size: [512, 768]
-              cloth_size: [512, 384]
+              image_size: [256, 256]
+              cloth_size: [256, 256]
 
 lightning:
   trainer:
